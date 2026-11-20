@@ -6,6 +6,7 @@ const pdf = require('pdf-parse/lib/pdf-parse.js');
 import markdownit from 'markdown-it';
 
 const PDF_DIR = './data/pdfs';
+const typesAvis = ['conseil', 'art10'];
 const MD_DIR = './data/markdown';
 const HTML_DIR = './data/html';
 
@@ -57,9 +58,10 @@ async function main() {
     }
   }
 
-  const pdfs = readdirSync(PDF_DIR).filter(f => f.endsWith('.pdf'));
+
+  const pdfs = readdirSync(PDF_DIR, {recursive: true}).filter(f => f.endsWith('.pdf'));
   if (pdfs.length === 0) {
-    console.error('Aucun PDF dans data/pdfs/. Lancez d\'abord : npm run download');
+    console.error('Aucun PDF dans data/pdfs. Lancez d\'abord : npm run download');
     process.exit(1);
   }
 
