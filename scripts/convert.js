@@ -204,7 +204,25 @@ function cleanText(text) {
     // Pied de page de la dernière page (ancien format), en fin de texte
     .replace(/\n+Commission d’accès aux documents\s*$/, '')
     .trim();
-  return reflow(clean);
+  return removeSignatures(reflow(clean));
+}
+
+const ADOPTION_LINE = /^(Avis adopté|Luxembourg,? le|Fait à Luxembourg)/i;
+
+// Removes the names of the CAD members signing the avis: short paragraphs after the
+// last adoption line ("Avis adopté à l'unanimité le …"). Notes placed after it
+// (case law, parliamentary documents, "Ibid.") are kept: they contain digits or end with
+// punctuation. OCR noise around signatures ("/ /", "Pierre Calmes LT") is removed too.
+function removeSignatures(text) {
+  const paragraphs = text.split('\n\n');
+  let last = -1;
+  paragraphs.forEach((p, i) => { if (ADOPTION_LINE.test(p)) last = i; });
+  if (last === -1) return text;
+  const isSignature = p => p.length <= 45 && !/\d/.test(p) && !/[.:;!?»)]$/.test(p.trim());
+  return [
+    ...paragraphs.slice(0, last + 1),
+    ...paragraphs.slice(last + 1).filter(p => !isSignature(p)),
+  ].join('\n\n');
 }
 
 const LIST_ITEM = /^([-–•▪●*]|\d{1,2}[.)]|[a-z][.)]|[ivx]{1,4}[.)]|\(\d{1,2}\)|\([a-z]\)|\([ivx]{1,4}\))\s/;
