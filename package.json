@@ -6,17 +6,24 @@
     "fetch": "node scripts/fetch.js",
     "download": "node scripts/download.js",
     "convert": "node scripts/convert.js",
+    "search": "node scripts/generate-pdf-index.js && pagefind --site data",
+    "search:serve": "node scripts/generate-pdf-index.js && pagefind --site data --serve",
     "query": "node scripts/query.js",
-    "pipeline": "npm run fetch && npm run download && npm run convert"
+    "upload": "node scripts/upload.js",
+    "pipeline": "npm run fetch && npm run download && npm run convert && npm run search"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
     "dotenv": "^16.0.0",
     "https-proxy-agent": "^9.1.0",
+    "jszip": "^3.10.2",
     "markdown-it": "^14.2.0",
     "node-fetch": "^3.3.2",
     "pdf-parse": "^1.1.1",
     "proxy-from-env": "^1.1.0",
     "throttled-queue": "^2.1.4"
+  },
+  "devDependencies": {
+    "pagefind": "^1.5.2"
   }
 }

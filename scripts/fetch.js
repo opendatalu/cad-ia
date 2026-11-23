@@ -18,6 +18,12 @@ function parseDate(linkText) {
   return m ? m[1] : null;
 }
 
+// Extract the year from the PDF's parent folder (e.g. ".../demande-de-conseil/2021/Avis-1-2021.pdf" → 2021).
+function parseYear(pdfUrl) {
+  const m = new URL(pdfUrl).pathname.match(/\/((?:19|20)\d{2})\/[^/]+$/);
+  return m ? Number(m[1]) : null;
+}
+
 function parseDecision(desc) {
   const d = desc.toLowerCase();
   const hasPartPos = d.includes('partiellement positif');
@@ -50,6 +56,7 @@ async function fetchPage(url, type) {
     const file = Path.basename(new URL(pdfUrl).pathname)
     const reference = parseReference(linkText);
     const date = parseDate(linkText);
+    const year = parseYear(pdfUrl);
 
     const fullText = $(li).text().trim();
     const idx = fullText.indexOf(linkText);
@@ -61,7 +68,7 @@ async function fetchPage(url, type) {
     const decision = parseDecision(description);
 
     if (reference && pdfUrl) {
-      avis.push({ type, reference, date, decision, description, pdfUrl, file });
+      avis.push({ type, reference, date, year, decision, description, pdfUrl, file });
     }
   });
 

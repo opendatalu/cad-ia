@@ -1,196 +1,141 @@
+/**
+ * Publication sur data.public.lu
+ *
+ * Pour chaque type d'avis, crée une archive zip par année à partir de
+ * data/pdfs/<type>/<année>/ (dans data/archives/<type>-<année>.zip), puis la
+ * synchronise avec le dataset dédié au type :
+ *   - archive absente du dataset          → création de la ressource
+ *   - archive présente, hash différent    → mise à jour de la ressource
+ *   - archive présente, hash identique    → rien
+ */
 import * as dotenv from 'dotenv'
 import process from 'node:process'
-import * as odp from './odp.js'
+import crypto from 'node:crypto'
 import Path from 'path'
-import { readFileSync } from 'fs'
-import { readdir, readFile, stat } from 'fs/promises'
+import { readdirSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import JSZip from 'jszip'
+import * as odp from './odp.js'
 import { log } from './utils.js'
-const avis = JSON.parse(readFileSync('./data/avis.json', 'utf8'));
 
-let avis_meta = {}
-avis_meta['art10'] = {}
-avis_meta['conseil'] = {}
-for (const item of avis) {
-  if (item['type'] == 'art10') {
-    avis_meta['art10'][toODPNames(item['file'])] = item;
-  } else {
-    avis_meta['conseil'][toODPNames(item['file'])] = item;
-  }
+const PDF_DIR = './data/pdfs'
+const ARCHIVE_DIR = './data/archives'
+
+const TYPES = {
+  art10: { label: 'demandes sur base de l\'article 10', datasetEnv: 'art10ArchivesId' },
+  conseil: { label: 'demandes de conseil', datasetEnv: 'conseilArchivesId' }
 }
 
-async function list (path) {
-  // Read directory entries
-  const dirents = await readdir(path)
+// Date fixe pour toutes les entrées : l'archive ne dépend que du contenu des PDF,
+// donc son hash ne change que si un PDF est ajouté, retiré ou modifié.
+const FIXED_DATE = new Date(Date.UTC(2000, 0, 1))
 
-  // Get file infos for all entries concurrently
-  const stats = await Promise.all((dirents.map(e => {
-    return stat(path + '/' + e)
-  })))
-
-  // Build result array with file metadata
-  const result = []
-  dirents.forEach((v, i) => {
-    result.push({
-      name: path + '/' + v,
-      type: stats[i].isFile() ? 'f' : (stats[i].isDirectory() ? 'd' : 'o'),
-      modifyTime: stats[i].mtime
-    })
-  })
-
-  return result
+/**
+ * Crée l'archive zip d'une année, de façon déterministe.
+ * Les PDF sont stockés sans recompression (ils sont déjà compressés).
+ */
+async function buildArchive (yearDir) {
+  const files = readdirSync(yearDir).filter(f => f.toLowerCase().endsWith('.pdf')).sort()
+  const zip = new JSZip()
+  for (const f of files) {
+    zip.file(f, readFileSync(Path.join(yearDir, f)), { date: FIXED_DATE, createFolders: false })
+  }
+  const data = await zip.generateAsync({ type: 'nodebuffer', compression: 'STORE', platform: 'UNIX' })
+  return { data, count: files.length }
 }
 
 function getFilenameFromURL (url) {
-  const pathName = new URL(url).pathname
-  return Path.basename(pathName)
+  return Path.basename(new URL(url).pathname)
 }
 
-function toODPNames (name) {
-  name = Path.basename(name)
-
-  // Remove accents using Unicode normalization
-  name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  // Convert to lowercase for consistency
-  name = name.toLowerCase()
-  // Remove apostrophes and trim whitespace
-  name = name.replaceAll('\'', '').trim()
-
-  // Split by unwanted characters (keep only alphanumeric and dots)
-  const unwanted = /[^[A-Za-z0-9.]+/
-  const words = name.split(unwanted)
-  // Note: empty words are automatically filtered by join
-
-  // Merge words with dashes as separators
-  name = words.join('-')
-
-  // Udata removes dashes at the beginning of filenames
-  name = name.replace(/^-+/, '')
-
-  return name
+function hashOf (data, algo) {
+  return crypto.createHash(algo).update(data).digest('hex')
 }
 
+async function sync (type) {
+  const { label, datasetEnv } = TYPES[type]
+  const datasetId = process.env[datasetEnv]
+  if (!datasetId) {
+    console.error(`Variable ${datasetEnv} non définie : archives ${type} ignorées`)
+    process.exitCode = 1
+    return
+  }
 
+  const typeDir = Path.join(PDF_DIR, type)
+  if (!existsSync(typeDir)) {
+    console.error(`${typeDir} introuvable. Lancez d'abord : npm run download`)
+    process.exitCode = 1
+    return
+  }
 
-async function main() {
-    // Load environment configuration
-    dotenv.config()
-    await sync('./data/pdfs/art10', process.env.art10Id, 'art10')
-    await sync('./data/pdfs/conseil', process.env.conseilId, 'conseil')
+  const dataset = await odp.getDataset(datasetId)
+  if (!Array.isArray(dataset.resources)) {
+    // Sans la liste des ressources, on recréerait des archives déjà publiées
+    console.error(`Impossible de lire le dataset ${datasetId} (${datasetEnv}) : archives ${type} ignorées`)
+    process.exitCode = 1
+    return
+  }
+  const remote = new Map(
+    dataset.resources
+      .filter(r => r.type === 'main')
+      .map(r => [getFilenameFromURL(r.url), r])
+  )
 
+  const years = readdirSync(typeDir, { withFileTypes: true })
+    .filter(d => d.isDirectory() && /^\d{4}$/.test(d.name))
+    .map(d => d.name)
+    .sort()
+
+  mkdirSync(ARCHIVE_DIR, { recursive: true })
+
+  for (const year of years) {
+    const filename = `${type}-${year}.zip`
+    const { data, count } = await buildArchive(Path.join(typeDir, year))
+    if (count === 0) continue
+    writeFileSync(Path.join(ARCHIVE_DIR, filename), data)
+
+    const title = `Avis de la CAD ${year} – ${label}`
+    const description = `Archive des ${count} avis de la Commission d'accès aux documents publiés en ${year} (${label}).`
+    const existing = remote.get(filename)
+
+    if (!existing) {
+      const result = await odp.uploadResource(filename, data, datasetId, 'application/zip')
+      if (!result.id) {
+        console.error(`Erreur : échec de l'upload de ${filename}`)
+        process.exitCode = 1
+        continue
+      }
+      await odp.updateResourceMeta(datasetId, result.id, title, description)
+      console.log(`${filename} : ajouté (${count} avis)`)
+      continue
+    }
+
+    const algo = existing.checksum?.type || 'sha1'
+    if (existing.checksum?.value && existing.checksum.value === hashOf(data, algo)) {
+      console.log(`${filename} : inchangé`)
+      continue
+    }
+
+    const result = await odp.updateResource(filename, data, datasetId, existing.id, 'application/zip')
+    const resultMeta = await odp.updateResourceMeta(datasetId, existing.id, title, description)
+    if (Object.keys(result).length === 0 || Object.keys(resultMeta).length === 0) {
+      console.error(`Erreur : échec de la mise à jour de ${filename}`)
+      process.exitCode = 1
+      continue
+    }
+    console.log(`${filename} : mis à jour (${count} avis)`)
+  }
+
+  // Les ressources sans archive locale correspondante ne sont pas supprimées automatiquement
+  const local = new Set(years.map(y => `${type}-${y}.zip`))
+  const orphans = [...remote.keys()].filter(f => !local.has(f))
+  if (orphans.length > 0) log(`Ressources du dataset ${type} sans archive locale (non supprimées) :`, orphans)
 }
 
-async function sync(path, datasetId, avis_type) { 
-
-    const dataset = await odp.getDataset(datasetId)
-    const resources = dataset.resources
-
-    //get the list of local files
-
-    let localFiles = []
-    localFiles = await list(path) // list all files in ./data/pdfs
-
-    // Create normalized filename collections for comparison
-    const caseInsensitiveLocalFilesArr = localFiles.map(e => toODPNames(e.name))
-    const caseInsensitiveLocalFilesSet = new Set(caseInsensitiveLocalFilesArr)
-    const nrLocalFiles = caseInsensitiveLocalFilesSet.size
-
-    let filesOnODPArr = dataset.resources.filter(x => x.type === 'main').map(e => getFilenameFromURL(e.url))
-    const filesOnODPSet = new Set(filesOnODPArr)
-
-    let toAdd = [...new Set(caseInsensitiveLocalFilesArr.filter(x => !filesOnODPSet.has(x)))]
-
-    // Calculate files to update (exists on both, only if overwrite enabled)
-    let toUpdate = []
-    if (process.env.overwrite === 'true') {
-        toUpdate = [...new Set(caseInsensitiveLocalFilesArr.filter(x => filesOnODPSet.has(x)))]
-    }
-
-    // Calculate files to delete (on ODP but not on FTP)
-    let toDelete = []
-    toDelete = [...new Set(filesOnODPArr.filter(x => !caseInsensitiveLocalFilesSet.has(x)))]
-
-    log('Files to add:', toAdd)
-    log('Files to update:', toUpdate)
-    log('Files to delete:', toDelete)
-
-    // Process deletions first
-    for (const e of toDelete) {
-        const meta = getResourceMeta(e, dataset.resources)
-        const result = await odp.deleteResource(datasetId, meta.id)
-
-        if (result) {
-            log('Resource deletion succeeded for', e)
-        } else {
-            console.error('Error: Resource deletion failed for', e)
-            process.exitCode = 1
-        }
-    }
-    // Process new file uploads
-    for (const e of toAdd) {
-        // Download file from FTP
-        const file = await readFile(path + '/' + e)
-        // Upload to ODP
-        const result = await odp.uploadResource(e, file, datasetId, 'application/pdf')
-
-        const status = (Object.keys(result).length !== 0)
-        if (status) {
-            log('Resource upload succeeded for', e)
-        } else {
-            console.error('Error: Resource upload failed for', e)
-            process.exitCode = 1
-        }
-
-        // Update metadata (workaround for potential udata bug)
-        console.log(e, avis_meta[avis_type][e] )
-        let name = 'Avis ' + avis_meta[avis_type][e].reference 
-        if (avis_meta[avis_type][e].date !== null) { name = name + ' du ' + avis_meta[avis_type][e].date } 
-        const resultMeta = await odp.updateResourceMeta(datasetId, result.id, name, avis_meta[avis_type][e].description)
-    }
-
-    // Process file updates with checksum validation
-    for (const e of toUpdate) {
-        // Download file from FTP
-        const file = await readFile(e)
-        // Get existing resource metadata
-        const meta = getResourceMeta(e, dataset.resources)
-
-        // Compare checksums to determine if update is needed
-        const algo = meta.checksum.type
-        const odpHash = meta.checksum.value
-
-        let update = true
-
-        // Calculate hash of FTP file
-        const hash = crypto.createHash(algo)
-        hash.update(file)
-        const fileHash = hash.digest('hex')
-
-        // Skip update if checksums match
-        if (odpHash === fileHash) {
-            update = false
-            log('File ' + e + ' is already up to date.')
-        }
-
-        if (update) {
-            // Update the file content
-            const result = await odp.updateResource(e, file, datasetId, meta.id, 'application/pdf')
-
-            // Update metadata (workaround for potential udata bug)
-            const resultMeta = await odp.updateResourceMeta(datasetId, meta.id, meta.title, meta.description)
-
-            // Check if both operations succeeded
-            const status = (Object.keys(result).length !== 0) && (Object.keys(resultMeta).length !== 0)
-            if (status) {
-                log('Resource update succeeded for', e)
-            } else {
-                console.error('Error: Resource update failed for', e)
-                process.exitCode = 1
-            }
-        }
-    }
-
-
-
+async function main () {
+  dotenv.config()
+  for (const type of Object.keys(TYPES)) {
+    await sync(type)
+  }
 }
 
-main().then(() => { log((new Date()).toLocaleString(), 'Sync successful') }).catch(e => { console.error(e); process.exitCode = 1 })
+main().then(() => { log((new Date()).toLocaleString(), 'Sync terminée') }).catch(e => { console.error(e); process.exitCode = 1 })

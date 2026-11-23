@@ -1,0 +1,77 @@
+name: Recherche plein texte (GitHub Pages)
+
+on:
+  # Régénération quotidienne pour intégrer les nouveaux avis publiés par la CAD
+  schedule:
+    - cron: '0 5 * * *'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Une seule publication à la fois ; on ne coupe pas un déploiement en cours
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Récupération de la liste des avis
+        run: npm run fetch
+
+      # Les PDF ne changent pas une fois publiés : on les garde en cache
+      # entre deux exécutions pour ne télécharger que les nouveaux.
+      - name: Cache des PDF
+        uses: actions/cache@v4
+        with:
+          path: data/pdfs
+          key: pdfs-${{ hashFiles('data/avis.json') }}
+          restore-keys: pdfs-
+
+      - name: Téléchargement des PDF
+        run: npm run download
+
+      - name: Conversion en Markdown / HTML
+        run: npm run convert
+
+      - name: Génération de la page de recherche et de l'index Pagefind
+        run: npm run search
+
+      # On ne publie que le site (page de recherche, pages des avis, index).
+      # Les PDF et le Markdown restent hors du site : les pages renvoient
+      # vers les PDF originaux sur cad.gouvernement.lu.
+      - name: Préparation du site
+        run: |
+          mkdir -p _site
+          cp -r data/index.html data/html data/pagefind _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

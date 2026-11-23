@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
-import { join, basename } from 'path';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { join, basename, sep } from 'path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pdf = require('pdf-parse/lib/pdf-parse.js');
@@ -14,6 +14,65 @@ function yamlEscape(val) {
   if (val === null || val === undefined) return 'null';
   const s = String(val).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
   return `"${s}"`;
+}
+
+// Same normalization as download.js: maps the PDF URL file name to the local file name
+function toODPNames(name) {
+  name = basename(name)
+  name = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  name = name.toLowerCase()
+  name = name.replaceAll('\'', '').trim()
+  const words = name.split(/[^[A-Za-z0-9.]+/)
+  name = words.join('-')
+  return name.replace(/^-+/, '')
+}
+
+function htmlEscape(val) {
+  return String(val)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function avisTitle(meta, fallback) {
+  if (!meta.reference) return fallback;
+  return `Avis ${meta.reference}${meta.date ? ` du ${meta.date}` : ''}`;
+}
+
+const TYPE_LABELS = { conseil: 'Demande de conseil', art10: 'Demande art. 10' };
+
+// HTML page for one avis, annotated for Pagefind (body, metadata and filters)
+function buildHtml(meta, title, rendered) {
+  const e = htmlEscape;
+  const pfMeta = [];
+  if (meta.date) pfMeta.push(`<span data-pagefind-meta="date">${e(meta.date)}</span>`);
+  if (meta.pdfUrl) pfMeta.push(`<span data-pagefind-meta="pdf">${e(meta.pdfUrl)}</span>`);
+  const pfFilters = [];
+  if (meta.type) pfFilters.push(`<span data-pagefind-filter="Type">${e(TYPE_LABELS[meta.type] || meta.type)}</span>`);
+  if (meta.year) pfFilters.push(`<span data-pagefind-filter="Année">${e(meta.year)}</span>`);
+  if (meta.decision) pfFilters.push(`<span data-pagefind-filter="Décision">${e(meta.decision)}</span>`);
+
+  return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${e(title)}</title>
+  <style>body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem;line-height:1.5}</style>
+</head>
+<body>
+<p><a href="../index.html">← Recherche</a></p>
+<main data-pagefind-body>
+  <h1 data-pagefind-meta="title">${e(title)}</h1>
+  <div hidden data-pagefind-ignore>${pfMeta.join('')}${pfFilters.join('')}</div>
+  <p data-pagefind-ignore>
+    ${[meta.type && e(TYPE_LABELS[meta.type] || meta.type), meta.decision && `Décision : ${e(meta.decision)}`].filter(Boolean).join(' · ')}
+    ${meta.pdfUrl ? `<br><a href="${e(meta.pdfUrl)}">PDF original</a>` : ''}
+  </p>
+${rendered}
+</main>
+</body>
+</html>
+`;
 }
 
 function buildFrontmatter(meta) {
@@ -48,13 +107,17 @@ async function main() {
   }
 
   mkdirSync(MD_DIR, { recursive: true });
+  // HTML pages are fully derived from the PDFs: rebuild the folder to drop stale pages
+  rmSync(HTML_DIR, { recursive: true, force: true });
+  mkdirSync(HTML_DIR, { recursive: true });
+  const md = new markdownit();
 
   const avisMap = {};
   if (existsSync('./data/avis.json')) {
     const avis = JSON.parse(readFileSync('./data/avis.json', 'utf8'));
     for (const item of avis) {
-      const key = `${item.type}-${item.reference.replace(/\//g, '-')}`;
-      avisMap[key] = item;
+      // Key on <type>/<local file name>, matching data/pdfs/<type>/<year>/<file>
+      avisMap[`${item.type}/${toODPNames(item.file)}`] = item;
     }
   }
 
@@ -70,7 +133,9 @@ async function main() {
   for (const pdfFile of pdfs) {
     const key = basename(pdfFile, '.pdf');
     const mdPath = join(MD_DIR, `${key}.md`);
-    const meta = avisMap[key] || {};
+    const type = pdfFile.split(sep)[0];
+    const meta = avisMap[`${type}/${basename(pdfFile)}`] || {};
+    if (!meta.pdfUrl) console.warn(`\n  Avertissement : ${pdfFile} absent de data/avis.json, pas d'URL PDF`);
 
     process.stdout.write(`Converting ${pdfFile}...`);
     try {
@@ -81,6 +146,7 @@ async function main() {
       const frontmatter = buildFrontmatter({
         reference: meta.reference || key,
         date: meta.date || null,
+        year: meta.year || null,
         type: meta.type || null,
         decision: meta.decision || null,
         pdfUrl: meta.pdfUrl || null,
@@ -88,6 +154,7 @@ async function main() {
       });
 
       writeFileSync(mdPath, `${frontmatter}\n\n${text}`, 'utf8');
+      writeFileSync(join(HTML_DIR, `${key}.html`), buildHtml(meta, avisTitle(meta, key), md.render(text)), 'utf8');
       console.log(` OK (${data.numpages} page${data.numpages > 1 ? 's' : ''})`);
       converted++;
     } catch (err) {
@@ -98,36 +165,7 @@ async function main() {
 
   console.log(`\nTerminé : ${converted} convertis, ${errors} erreurs`);
 
-  // Convert markdown files to HTML
-  mkdirSync(HTML_DIR, { recursive: true });
-  const md = new markdownit();
-  const mds = readdirSync(MD_DIR).filter(f => f.endsWith('.md'));
-  let htmlConverted = 0;
-
-  for (const mdFile of mds) {
-    const key = basename(mdFile, '.md');
-    const content = readFileSync(join(MD_DIR, mdFile), 'utf8');
-    const parts = content.split('---');
-    const body = parts.length >= 3 ? parts.slice(2).join('---').trim() : content;
-    const rendered = md.render(body);
-
-    const html = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${key}</title>
-</head>
-<body>
-${rendered}
-</body>
-</html>
-`;
-    writeFileSync(join(HTML_DIR, `${key}.html`), html, 'utf8');
-    htmlConverted++;
-  }
-
-  console.log(`HTML générés : ${htmlConverted}`);
+  console.log(`HTML générés dans ${HTML_DIR} : ${converted}`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

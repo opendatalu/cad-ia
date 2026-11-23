@@ -5,13 +5,15 @@ Pipeline pour télécharger, convertir et interroger les avis de la [Commission 
 ## Workflow
 
 ```
-fetch → download → convert → query
+fetch → download → convert → search
+                              ↘ query
 ```
 
 1. **fetch** — scrape les deux pages HTML de la CAD et génère `data/avis.json`
-2. **download** — télécharge tous les PDFs dans `data/pdfs/`
-3. **convert** — convertit chaque PDF en Markdown avec frontmatter YAML dans `data/markdown/`
-4. **query** — envoie chaque fichier Markdown à Ollama avec un prompt, sauvegarde les réponses
+2. **download** — télécharge tous les PDFs dans `data/pdfs/<type>/<année>/`
+3. **convert** — convertit chaque PDF en Markdown avec frontmatter YAML dans `data/markdown/`, et en page HTML dans `data/html/`
+4. **search** — génère la page de recherche `data/index.html` et l'index plein texte [Pagefind](https://pagefind.app) dans `data/pagefind/`
+5. **query** — envoie chaque fichier Markdown à Ollama avec un prompt, sauvegarde les réponses
 
 ## Prérequis
 
@@ -26,7 +28,7 @@ npm install
 
 ## Utilisation
 
-### Pipeline complet (fetch + download + convert)
+### Pipeline complet (fetch + download + convert + search)
 
 ```bash
 npm run pipeline
@@ -37,7 +39,28 @@ npm run pipeline
 ```bash
 npm run fetch      # → data/avis.json
 npm run download   # → data/pdfs/
-npm run convert    # → data/markdown/
+npm run convert    # → data/markdown/, data/html/
+npm run search     # → data/index.html, data/pagefind/
+```
+
+### Publication sur data.public.lu
+
+```bash
+npm run upload     # → data/archives/<type>-<année>.zip, puis envoi sur data.public.lu
+```
+
+Crée une archive zip par type d'avis et par année, puis la publie dans le dataset du type
+(`art10ArchivesId`, `conseilArchivesId`). Une archive n'est envoyée que si elle est nouvelle
+ou si son hash diffère de celui de la ressource publiée. Les archives sont construites de
+façon déterministe (ordre et dates fixes) : leur hash ne change que si leur contenu change.
+
+### Recherche plein texte
+
+```bash
+npm run search:serve   # génère l'index puis sert data/ sur http://localhost:1414
+```
+
+Le dossier `data/` (avec `index.html`, `html/` et `pagefind/`) peut aussi être publié tel quel sur n'importe quel hébergement statique.
 ```
 
 ### Interroger les avis
@@ -70,6 +93,14 @@ Fichier `.env` :
 ```
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=mistral:latest
+
+# Publication sur data.public.lu (npm run upload)
+odpURL="https://data.public.lu/api/1"
+odpAPIKey="..."
+art10ArchivesId="..."      # dataset des archives art. 10
+conseilArchivesId="..."    # dataset des archives demandes de conseil
+callRateNrCalls=1
+callRateDuration=1000
 ```
 
 ## Sources
@@ -81,8 +112,9 @@ OLLAMA_MODEL=mistral:latest
 
 ```
 data/
-  avis.json        index de tous les avis (référence, date, décision, URL PDF)
-  pdfs/            PDFs téléchargés
+  avis.json        index de tous les avis (référence, date, année, décision, URL PDF)
+  pdfs/            PDFs téléchargés (pdfs/<type>/<année>/)
+  archives/        archives zip par type et par année (npm run upload)
   markdown/        Markdown généré (frontmatter + texte extrait)
 results/           Résultats des requêtes Ollama
 scripts/
@@ -90,4 +122,5 @@ scripts/
   download.js      téléchargement PDFs
   convert.js       PDF → Markdown
   query.js         requêtes Ollama
+  upload.js        archives zip + publication sur data.public.lu
 ```

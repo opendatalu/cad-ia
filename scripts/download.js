@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { join, dirname } from 'path';
 import Path from 'path'
 
 const PDF_DIR = './data/pdfs';
@@ -48,16 +48,31 @@ async function main() {
   mkdirSync(PDF_DIR, { recursive: true });
 
   const avis = JSON.parse(readFileSync('./data/avis.json', 'utf8'));
-  let downloaded = 0, skipped = 0, errors = 0;
+  let downloaded = 0, skipped = 0, moved = 0, errors = 0;
 
   for (const item of avis) {
     //const filename = `${item.type}-${slugify(item.reference)}.pdf`;
     //const dest = join(PDF_DIR, filename);
     const filename = Path.basename(new URL(item.pdfUrl).pathname)
-    const dest = join(PDF_DIR, item.type, toODPNames(filename))
+    if (!item.year) {
+      console.error(`Année manquante pour ${filename}. Relancez d'abord : npm run fetch`);
+      errors++;
+      continue;
+    }
+    const dest = join(PDF_DIR, item.type, String(item.year), toODPNames(filename))
 
     if (existsSync(dest)) {
       skipped++;
+      continue;
+    }
+
+    mkdirSync(dirname(dest), { recursive: true });
+
+    // Migrate files downloaded with the previous flat layout (data/pdfs/<type>/<file>)
+    const legacy = join(PDF_DIR, item.type, toODPNames(filename))
+    if (existsSync(legacy)) {
+      renameSync(legacy, dest);
+      moved++;
       continue;
     }
 
@@ -72,7 +87,7 @@ async function main() {
     }
   }
 
-  console.log(`\nTerminé : ${downloaded} téléchargés, ${skipped} déjà présents, ${errors} erreurs`);
+  console.log(`\nTerminé : ${downloaded} téléchargés, ${moved} déplacés, ${skipped} déjà présents, ${errors} erreurs`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
