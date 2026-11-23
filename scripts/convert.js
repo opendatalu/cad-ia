@@ -1,5 +1,7 @@
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, rmSync, mkdtempSync } from 'fs';
 import { join, basename, sep } from 'path';
+import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pdf = require('pdf-parse/lib/pdf-parse.js');
@@ -9,8 +11,14 @@ const PDF_DIR = './data/pdfs';
 const typesAvis = ['conseil', 'art10'];
 const MD_DIR = './data/markdown';
 const HTML_DIR = './data/html';
-// Single document with all avis (outside MD_DIR so that query.js does not pick it up)
+// Single document with all avis, and one document per type and year
+// (outside MD_DIR so that query.js does not pick them up)
 const ALL_MD = './data/avis.md';
+const CORPUS_DIR = './data/corpus';
+// OCR results of scanned PDFs (cache: OCR is only run once per PDF)
+const OCR_DIR = './data/ocr';
+// Below this number of characters, the PDF is considered scanned (no text layer)
+const MIN_TEXT_CHARS = 100;
 
 function yamlEscape(val) {
   if (val === null || val === undefined) return 'null';
@@ -79,34 +87,94 @@ ${rendered}
 
 const SECTION_LABELS = { conseil: 'Demandes de conseil', art10: 'Demandes sur base de l\'article 10' };
 
-// Builds one Markdown document with all avis: by type, then year (most recent first)
-function buildAllMarkdown(entries) {
-  const out = [
-    '# Avis de la Commission d\'accès aux documents',
-    '',
-    `${entries.length} avis.`,
-  ];
-  const types = [...Object.keys(SECTION_LABELS), ...new Set(entries.map(e => e.type).filter(t => !(t in SECTION_LABELS)))];
-  for (const type of types) {
+function sortEntries(entries) {
+  const typeOrder = Object.keys(SECTION_LABELS);
+  const rank = t => (typeOrder.includes(t) ? typeOrder.indexOf(t) : typeOrder.length);
+  return [...entries].sort((a, b) =>
+    rank(a.type) - rank(b.type) ||
+    b.year - a.year ||
+    a.file.localeCompare(b.file, 'fr', { numeric: true }));
+}
+
+function cell(val) {
+  return String(val ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
+}
+
+// Self-contained block for one avis: the header repeats all metadata so that
+// a chunk taken from this avis can be identified on its own.
+function avisBlock(e, level) {
+  const m = e.meta;
+  const out = [`${'#'.repeat(level)} ${e.title}`, ''];
+  out.push(`- **Référence :** ${m.reference || e.file}`);
+  out.push(`- **Type :** ${TYPE_LABELS[e.type] || e.type}`);
+  out.push(`- **Année :** ${e.year}`);
+  if (m.date) out.push(`- **Date :** ${m.date}${m.dateSource === 'texte' ? ' (date d\'adoption, tirée du texte)' : ''}`);
+  if (m.decision) out.push(`- **Décision :** ${m.decision}`);
+  if (m.description) out.push(`- **Objet :** ${m.description}`);
+  if (m.pdfUrl) out.push(`- **PDF :** <${m.pdfUrl}>`);
+  if (m.ocr) out.push('- **Texte :** obtenu par reconnaissance optique (OCR) d\'un PDF scanné, peut contenir des erreurs');
+  out.push('', e.text || '*(Texte non disponible : PDF scanné sans couche texte.)*');
+  return out.join('\n');
+}
+
+function indexTable(entries) {
+  const rows = entries.map(e =>
+    `| ${cell(e.meta.reference || e.file)} | ${cell(e.meta.date)} | ${cell(e.year)} | ${cell(TYPE_LABELS[e.type] || e.type)} | ${cell(e.meta.decision)} |`);
+  return ['| Référence | Date | Année | Type | Décision |', '|---|---|---|---|---|', ...rows].join('\n');
+}
+
+// Markdown document: title, index of all avis, then avis grouped by type and year (most recent first)
+function buildMarkdownDoc(entries, title) {
+  entries = sortEntries(entries);
+  const out = [`# ${title}`, '', `${entries.length} avis.`, '', '## Index des avis', '', indexTable(entries)];
+  for (const type of [...new Set(entries.map(e => e.type))]) {
     const ofType = entries.filter(e => e.type === type);
-    if (ofType.length === 0) continue;
     out.push('', `## ${SECTION_LABELS[type] || type} (${ofType.length})`);
-    const years = [...new Set(ofType.map(e => e.year))].sort((a, b) => b - a);
-    for (const year of years) {
-      const ofYear = ofType
-        .filter(e => e.year === year)
-        .sort((a, b) => a.file.localeCompare(b.file, 'fr', { numeric: true }));
+    for (const year of [...new Set(ofType.map(e => e.year))]) {
       out.push('', `### ${year}`);
-      for (const e of ofYear) {
-        out.push('', `#### ${e.title}`, '');
-        if (e.meta.decision) out.push(`- **Décision :** ${e.meta.decision}`);
-        if (e.meta.description) out.push(`- **Objet :** ${e.meta.description}`);
-        if (e.meta.pdfUrl) out.push(`- **PDF :** <${e.meta.pdfUrl}>`);
-        out.push('', e.text);
-      }
+      for (const e of ofType.filter(x => x.year === year)) out.push('', avisBlock(e, 4));
     }
   }
   return out.join('\n') + '\n';
+}
+
+/**
+ * OCR of a scanned PDF with Tesseract (pages rendered by pdftoppm).
+ * Returns the text with pages separated by \f, like pdf-parse, or null if the
+ * tools are not installed.
+ */
+function ocrPdf(pdfPath, cacheKey) {
+  const cachePath = join(OCR_DIR, `${cacheKey}.txt`);
+  if (existsSync(cachePath)) return readFileSync(cachePath, 'utf8');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'cad-ocr-'));
+  try {
+    execFileSync('pdftoppm', ['-r', '300', '-gray', '-png', pdfPath, join(tmp, 'page')], { stdio: 'ignore' });
+    const pages = readdirSync(tmp).filter(f => f.endsWith('.png')).sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    const text = pages
+      .map(p => execFileSync('tesseract', [join(tmp, p), '-', '-l', 'fra'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
+      .join('\f');
+    mkdirSync(OCR_DIR, { recursive: true });
+    writeFileSync(cachePath, text, 'utf8');
+    return text;
+  } catch (err) {
+    if (err.code === 'ENOENT') return null;
+    throw err;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const MONTHS = 'janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre';
+const ADOPTION_DATE = new RegExp(
+  `(?:Avis adopté[^.\\n]{0,40}?|Luxembourg,?)\\s+le\\s+(\\d{1,2}(?:er)?\\s+(?:${MONTHS})\\s+\\d{4})`, 'gi');
+
+// Date of adoption from the text of the avis ("Avis adopté à l'unanimité le 13 octobre 2021",
+// "Luxembourg, le 14 février 2019"): last occurrence, as it is at the end of the avis.
+function extractDate(text) {
+  const matches = [...text.matchAll(ADOPTION_DATE)];
+  if (matches.length === 0) return null;
+  return matches[matches.length - 1][1].replace(/\s+/g, ' ');
 }
 
 function buildFrontmatter(meta) {
@@ -131,7 +199,66 @@ function cleanText(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   // Après trim, le numéro de page initial (ancien format) se retrouve en tête
-  return clean.replace(/^\d+\n\n?/, '').trim();
+  clean = clean
+    .replace(/^\d+\n\n?/, '')
+    // Pied de page de la dernière page (ancien format), en fin de texte
+    .replace(/\n+Commission d’accès aux documents\s*$/, '')
+    .trim();
+  return reflow(clean);
+}
+
+const LIST_ITEM = /^([-–•▪●*]|\d{1,2}[.)]|[a-z][.)]|[ivx]{1,4}[.)]|\(\d{1,2}\)|\([a-z]\)|\([ivx]{1,4}\))\s/;
+
+// Rebuilds paragraphs from the PDF layout: lines wrapped by the PDF are joined,
+// page breaks inside a sentence are removed, short lines (lists, signatures,
+// « Présents : » block) keep their own line. Paragraphs are separated by a blank line.
+function reflow(text) {
+  text = text
+    // Superscripts extracted on their own line: "article 1\ner\n, paragraphe" → "article 1er, paragraphe"
+    .replace(/(\d)[ \t]*\n(ers?|ère|re|ème|e|o)[ \t]*\n/g, '$1$2 ')
+    .replace(/(\d(?:ers?|ère|re|ème|e|o)) ([,.)])/g, '$1$2')
+    // Justified text: runs of spaces
+    .replace(/[ \t]{2,}/g, ' ');
+
+  const lines = text.split('\n').map(l => l.trim())
+    // Page numbers alone on their line
+    .filter(l => !/^-?\s*\d{1,3}\s*-?$/.test(l));
+
+  const lengths = lines.filter(Boolean).map(l => l.length).sort((a, b) => a - b);
+  const width = Math.max(60, lengths[Math.floor(lengths.length * 0.8)] || 0);
+
+  const paragraphs = [];
+  let cur = '';
+  let last = '';
+  const flush = () => { if (cur) paragraphs.push(cur); cur = ''; last = ''; };
+  const nextNonEmpty = i => { for (let j = i + 1; j < lines.length; j++) if (lines[j]) return lines[j]; return ''; };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) {
+      // Blank line from a page break in the middle of a sentence: keep the paragraph open
+      // (next line in lower case, or previous line filling the whole width)
+      if (cur && !/[.!?:;]$/.test(last) &&
+          (/^[a-zà-ÿ,;)]/.test(nextNonEmpty(i)) || last.length >= 0.85 * width)) continue;
+      flush();
+      continue;
+    }
+    if (cur && !LIST_ITEM.test(line)) {
+      const continues = /^[a-zà-ÿ,;.)\]]/.test(line) && !/[.!?]$/.test(last);
+      const wrapped = last.length >= 0.7 * width && !/[.!?:;]$/.test(last);
+      if (continues || wrapped) {
+        // Keep the hyphen of compound words split at the end of a line (Grand-\nDuché)
+        cur += /[A-Za-zÀ-ÿ]-$/.test(last) ? line : ` ${line}`;
+        last = line;
+        continue;
+      }
+    }
+    flush();
+    cur = line;
+    last = line;
+  }
+  flush();
+  return paragraphs.join('\n\n');
 }
 
 async function main() {
@@ -169,14 +296,33 @@ async function main() {
     const key = basename(pdfFile, '.pdf');
     const mdPath = join(MD_DIR, `${key}.md`);
     const type = pdfFile.split(sep)[0];
-    const meta = avisMap[`${type}/${basename(pdfFile)}`] || {};
+    let meta = avisMap[`${type}/${basename(pdfFile)}`] || {};
     if (!meta.pdfUrl) console.warn(`\n  Avertissement : ${pdfFile} absent de data/avis.json, pas d'URL PDF`);
 
     process.stdout.write(`Converting ${pdfFile}...`);
     try {
       const buffer = readFileSync(join(PDF_DIR, pdfFile));
       const data = await pdf(buffer);
-      const text = cleanText(data.text);
+      let text = cleanText(data.text);
+
+      // Scanned PDF without text layer: OCR
+      let ocr = false;
+      if (text.replace(/\s/g, '').length < MIN_TEXT_CHARS) {
+        const ocrText = ocrPdf(join(PDF_DIR, pdfFile), key);
+        if (ocrText === null) {
+          console.warn(`\n  Avertissement : ${pdfFile} est scanné, mais tesseract/pdftoppm ne sont pas installés`);
+        } else {
+          text = cleanText(ocrText);
+          ocr = true;
+        }
+      }
+
+      // Date missing on the CAD website: take the adoption date from the text
+      if (!meta.date && meta.reference) {
+        const date = extractDate(text);
+        if (date) meta = { ...meta, date, dateSource: 'texte' };
+      }
+      if (ocr) meta = { ...meta, ocr: true };
 
       const frontmatter = buildFrontmatter({
         reference: meta.reference || key,
@@ -185,6 +331,7 @@ async function main() {
         type: meta.type || null,
         decision: meta.decision || null,
         pdfUrl: meta.pdfUrl || null,
+        ocr: meta.ocr || null,
         subject: meta.description ? meta.description.slice(0, 300) : null,
       });
 
@@ -210,8 +357,24 @@ async function main() {
 
   console.log(`HTML générés dans ${HTML_DIR} : ${converted}`);
 
-  writeFileSync(ALL_MD, buildAllMarkdown(allEntries), 'utf8');
+  writeFileSync(ALL_MD, buildMarkdownDoc(allEntries, 'Avis de la Commission d\'accès aux documents'), 'utf8');
   console.log(`Document unique : ${ALL_MD} (${allEntries.length} avis)`);
+
+  // One document per type and year, for tools that limit the size of a document
+  rmSync(CORPUS_DIR, { recursive: true, force: true });
+  mkdirSync(CORPUS_DIR, { recursive: true });
+  const groups = new Map();
+  for (const e of allEntries) {
+    const k = `${e.type}-${e.year}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(e);
+  }
+  for (const [k, entries] of groups) {
+    const { type, year } = entries[0];
+    writeFileSync(join(CORPUS_DIR, `${k}.md`),
+      buildMarkdownDoc(entries, `Avis de la Commission d'accès aux documents – ${SECTION_LABELS[type] || type} – ${year}`), 'utf8');
+  }
+  console.log(`Documents par type et par année : ${CORPUS_DIR}/ (${groups.size} fichiers)`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

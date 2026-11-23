@@ -33,7 +33,13 @@ if (!existsSync(join(DATA_DIR, 'avis.json'))) {
 
 const avis = JSON.parse(readFileSync(join(DATA_DIR, 'avis.json'), 'utf8'))
   .map(item => ({ ...item, page: `${basename(toODPNames(item.file), '.pdf')}.html` }))
-  .filter(item => existsSync(join(HTML_DIR, item.page)));
+  .filter(item => existsSync(join(HTML_DIR, item.page)))
+  // Missing dates are extracted from the text by convert.js and stored in the HTML page
+  .map(item => {
+    if (item.date) return item;
+    const m = readFileSync(join(HTML_DIR, item.page), 'utf8').match(/data-pagefind-meta="date">([^<]+)</);
+    return m ? { ...item, date: m[1] } : item;
+  });
 
 const sections = Object.entries(TYPE_LABELS).map(([type, label]) => {
   const items = avis

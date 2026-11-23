@@ -31,6 +31,12 @@ jobs:
 
       - run: npm ci
 
+      # OCR des PDF scannés (sans couche texte) lors de la conversion
+      - name: Installation de Tesseract (OCR)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra poppler-utils
+
       - name: Récupération de la liste des avis
         run: npm run fetch
 
@@ -46,7 +52,15 @@ jobs:
       - name: Téléchargement des PDF
         run: npm run download
 
-      - name: Conversion en Markdown / HTML
+      # L'OCR n'est fait qu'une fois par PDF scanné : les résultats sont gardés en cache
+      - name: Cache de l'OCR
+        uses: actions/cache@v4
+        with:
+          path: data/ocr
+          key: ocr-${{ hashFiles('data/avis.json') }}
+          restore-keys: ocr-
+
+      - name: Conversion en Markdown / HTML (avec OCR des PDF scannés)
         run: npm run convert
 
       - name: Génération de la page de recherche et de l'index Pagefind

@@ -11,7 +11,7 @@ fetch → download → convert → search
 
 1. **fetch** — scrape les deux pages HTML de la CAD et génère `data/avis.json`
 2. **download** — télécharge tous les PDFs dans `data/pdfs/<type>/<année>/`
-3. **convert** — convertit chaque PDF en Markdown avec frontmatter YAML dans `data/markdown/`, en page HTML dans `data/html/`, et regroupe tous les avis dans un seul document `data/avis.md`
+3. **convert** — convertit chaque PDF en Markdown avec frontmatter YAML dans `data/markdown/`, en page HTML dans `data/html/`, et regroupe les avis dans un document unique `data/avis.md` et dans un document par type et par année `data/corpus/<type>-<année>.md`
 4. **search** — génère la page de recherche `data/index.html` et l'index plein texte [Pagefind](https://pagefind.app) dans `data/pagefind/`
 5. **query** — envoie chaque fichier Markdown à Ollama avec un prompt, sauvegarde les réponses
 
@@ -19,6 +19,9 @@ fetch → download → convert → search
 
 - Node.js 18+
 - [Ollama](https://ollama.com) en cours d'exécution sur `http://localhost:11434`
+- Pour l'OCR des PDF scannés (étape convert) : [Tesseract](https://github.com/tesseract-ocr/tesseract) avec le français, et `pdftoppm` (poppler).
+  Sous Debian/Ubuntu : `sudo apt-get install tesseract-ocr tesseract-ocr-fra poppler-utils`.
+  Sans ces outils, les PDF scannés sont convertis sans texte (avec un avertissement).
 
 ## Installation
 
@@ -39,7 +42,7 @@ npm run pipeline
 ```bash
 npm run fetch      # → data/avis.json
 npm run download   # → data/pdfs/
-npm run convert    # → data/markdown/, data/html/, data/avis.md
+npm run convert    # → data/markdown/, data/html/, data/avis.md, data/corpus/
 npm run search     # → data/index.html, data/pagefind/
 ```
 
@@ -116,7 +119,9 @@ data/
   pdfs/            PDFs téléchargés (pdfs/<type>/<année>/)
   archives/        archives zip par type et par année (npm run upload)
   markdown/        Markdown généré (frontmatter + texte extrait)
-  avis.md          tous les avis dans un seul document Markdown
+  avis.md          tous les avis dans un seul document Markdown (index + un bloc autonome par avis)
+  corpus/          même contenu découpé par type et par année (<type>-<année>.md)
+  ocr/             texte des PDF scannés obtenu par OCR (cache)
 results/           Résultats des requêtes Ollama
 scripts/
   fetch.js         scraping HTML
