@@ -41,7 +41,7 @@ function toODPNames (name) {
 
 async function main() {
   if (!existsSync('./data/avis.json')) {
-    console.error('data/avis.json introuvable. Lancez d\'abord : npm run fetch');
+    console.error('data/avis.json not found. Run first: npm run fetch');
     process.exit(1);
   }
 
@@ -55,7 +55,7 @@ async function main() {
     //const dest = join(PDF_DIR, filename);
     const filename = Path.basename(new URL(item.pdfUrl).pathname)
     if (!item.year) {
-      console.error(`Année manquante pour ${filename}. Relancez d'abord : npm run fetch`);
+      console.error(`Missing year for ${filename}. Run first: npm run fetch`);
       errors++;
       continue;
     }
@@ -82,12 +82,12 @@ async function main() {
       console.log(' OK');
       downloaded++;
     } catch (err) {
-      console.error(` ERREUR: ${err.message}`);
+      console.error(` ERROR: ${err.message}`);
       errors++;
     }
   }
 
-  console.log(`\nTerminé : ${downloaded} téléchargés, ${moved} déplacés, ${skipped} déjà présents, ${errors} erreurs`);
+  console.log(`\nDone: ${downloaded} downloaded, ${moved} moved, ${skipped} already present, ${errors} errors`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

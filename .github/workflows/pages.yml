@@ -1,7 +1,7 @@
-name: Recherche plein texte (GitHub Pages)
+name: Full-text search (GitHub Pages)
 
 on:
-  # Régénération quotidienne pour intégrer les nouveaux avis publiés par la CAD
+  # Daily rebuild to include the new avis published by the CAD
   schedule:
     - cron: '0 5 * * *'
   push:
@@ -13,7 +13,7 @@ permissions:
   pages: write
   id-token: write
 
-# Une seule publication à la fois ; on ne coupe pas un déploiement en cours
+# One deployment at a time; a deployment in progress is not cancelled
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -31,45 +31,45 @@ jobs:
 
       - run: npm ci
 
-      # OCR des PDF scannés (sans couche texte) lors de la conversion
-      - name: Installation de Tesseract (OCR)
+      # OCR of scanned PDFs (without text layer) during conversion
+      - name: Install Tesseract (OCR)
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-fra poppler-utils
 
-      - name: Récupération de la liste des avis
+      - name: Fetch the list of avis
         run: npm run fetch
 
-      # Les PDF ne changent pas une fois publiés : on les garde en cache
-      # entre deux exécutions pour ne télécharger que les nouveaux.
-      - name: Cache des PDF
+      # PDFs don't change once published: they are cached between
+      # runs so that only new ones are downloaded.
+      - name: Cache PDFs
         uses: actions/cache@v4
         with:
           path: data/pdfs
           key: pdfs-${{ hashFiles('data/avis.json') }}
           restore-keys: pdfs-
 
-      - name: Téléchargement des PDF
+      - name: Download PDFs
         run: npm run download
 
-      # L'OCR n'est fait qu'une fois par PDF scanné : les résultats sont gardés en cache
-      - name: Cache de l'OCR
+      # OCR is only run once per scanned PDF: the results are cached
+      - name: Cache OCR results
         uses: actions/cache@v4
         with:
           path: data/ocr
           key: ocr-${{ hashFiles('data/avis.json') }}
           restore-keys: ocr-
 
-      - name: Conversion en Markdown / HTML (avec OCR des PDF scannés)
+      - name: Convert to Markdown / HTML (with OCR of scanned PDFs)
         run: npm run convert
 
-      - name: Génération de la page de recherche et de l'index Pagefind
+      - name: Generate the search page and the Pagefind index
         run: npm run search
 
-      # On ne publie que le site (page de recherche, pages des avis, index).
-      # Les PDF et le Markdown restent hors du site : les pages renvoient
-      # vers les PDF originaux sur cad.gouvernement.lu.
-      - name: Préparation du site
+      # Only the site is published (search page, avis pages, index).
+      # PDFs and Markdown stay out of the site: the pages link
+      # to the original PDFs on cad.gouvernement.lu.
+      - name: Prepare the site
         run: |
           mkdir -p _site
           cp -r data/index.html data/html data/pagefind _site/

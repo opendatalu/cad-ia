@@ -56,26 +56,26 @@ async function queryOllama(prompt, documentContent) {
 async function main() {
   const prompt = parseArgs();
   if (!prompt) {
-    console.error('Usage : node scripts/query.js --prompt "Votre question"');
-    console.error('        ou définir PROMPT= dans .env');
+    console.error('Usage: node scripts/query.js --prompt "Your question"');
+    console.error('       or set PROMPT= in .env');
     process.exit(1);
   }
 
   if (!existsSync(MD_DIR)) {
-    console.error('data/markdown/ introuvable. Lancez d\'abord : npm run convert');
+    console.error('data/markdown/ not found. Run first: npm run convert');
     process.exit(1);
   }
 
   const files = readdirSync(MD_DIR).filter(f => f.endsWith('.md')).sort();
   if (files.length === 0) {
-    console.error('Aucun fichier .md dans data/markdown/. Lancez d\'abord : npm run convert');
+    console.error('No .md file in data/markdown/. Run first: npm run convert');
     process.exit(1);
   }
 
   const model = process.env.OLLAMA_MODEL || 'llama3.2';
-  console.log(`Modèle  : ${model}`);
-  console.log(`Prompt  : ${prompt}`);
-  console.log(`Fichiers: ${files.length}\n`);
+  console.log(`Model:   ${model}`);
+  console.log(`Prompt:  ${prompt}`);
+  console.log(`Files:   ${files.length}\n`);
 
   mkdirSync(RESULTS_DIR, { recursive: true });
 
@@ -98,7 +98,7 @@ async function main() {
       });
       console.log(' OK');
     } catch (err) {
-      console.error(` ERREUR: ${err.message}`);
+      console.error(` ERROR: ${err.message}`);
       results.push({ reference: meta.reference, error: err.message });
     }
   }
@@ -110,7 +110,7 @@ async function main() {
     .replace(':', 'h');
   const outPath = join(RESULTS_DIR, `${now}.json`);
   writeFileSync(outPath, JSON.stringify({ prompt, results }, null, 2), 'utf8');
-  console.log(`\nRésultats sauvegardés dans ${outPath}`);
+  console.log(`\nResults saved in ${outPath}`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

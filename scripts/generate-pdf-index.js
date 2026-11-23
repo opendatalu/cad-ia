@@ -27,7 +27,7 @@ function e(val) {
 }
 
 if (!existsSync(join(DATA_DIR, 'avis.json'))) {
-  console.error('data/avis.json introuvable. Lancez d\'abord : npm run fetch');
+  console.error('data/avis.json not found. Run first: npm run fetch');
   process.exit(1);
 }
 
@@ -81,7 +81,7 @@ const html = `<!DOCTYPE html>
   <h1>Avis de la Commission d'accès aux documents</h1>
   <p>Recherche plein texte dans ${avis.length} avis.</p>
   <search>
-    <!-- bundle-path relatif au script pagefind-component-ui.js : fonctionne aussi sous un sous-chemin (GitHub Pages) -->
+    <!-- bundle-path is relative to the pagefind-component-ui.js script: also works under a sub-path (GitHub Pages) -->
     <pagefind-config bundle-path="./" preload></pagefind-config>
     <pagefind-input placeholder="Rechercher dans les avis…" autofocus></pagefind-input>
     <div class="filters">
@@ -100,4 +100,4 @@ ${sections}
 `;
 
 writeFileSync(OUTPUT, html, 'utf8');
-console.log(`Généré ${OUTPUT} avec ${avis.length} avis`);
+console.log(`Generated ${OUTPUT} with ${avis.length} avis`);

@@ -80,13 +80,13 @@ async function main() {
   for (const page of PAGES) {
     process.stdout.write(`Fetching ${page.url}...`);
     const avis = await fetchPage(page.url, page.type);
-    console.log(` ${avis.length} avis trouvés`);
+    console.log(` ${avis.length} avis found`);
     allAvis = allAvis.concat(avis);
   }
 
   mkdirSync('./data', { recursive: true });
   writeFileSync('./data/avis.json', JSON.stringify(allAvis, null, 2), 'utf8');
-  console.log(`\nTotal : ${allAvis.length} avis sauvegardés dans data/avis.json`);
+  console.log(`\nTotal: ${allAvis.length} avis saved in data/avis.json`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

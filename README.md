@@ -1,6 +1,6 @@
 # cad-ia
 
-Pipeline pour télécharger, convertir et interroger les avis de la [Commission d'accès aux documents](https://cad.gouvernement.lu) (Luxembourg) via un LLM local (Ollama).
+Pipeline to download, convert, search and query the opinions (*avis*) of the [Commission d'accès aux documents](https://cad.gouvernement.lu) (CAD, Luxembourg's commission for access to documents), including with a local LLM (Ollama).
 
 ## Workflow
 
@@ -9,19 +9,19 @@ fetch → download → convert → search
                               ↘ query
 ```
 
-1. **fetch** — scrape les deux pages HTML de la CAD et génère `data/avis.json`
-2. **download** — télécharge tous les PDFs dans `data/pdfs/<type>/<année>/`
-3. **convert** — convertit chaque PDF en Markdown avec frontmatter YAML dans `data/markdown/`, en page HTML dans `data/html/`, et regroupe les avis dans un document unique `data/avis.md` et dans un document par type et par année `data/corpus/<type>-<année>.md`
-4. **search** — génère la page de recherche `data/index.html` et l'index plein texte [Pagefind](https://pagefind.app) dans `data/pagefind/`
-5. **query** — envoie chaque fichier Markdown à Ollama avec un prompt, sauvegarde les réponses
+1. **fetch** — scrapes the two HTML pages of the CAD and generates `data/avis.json`
+2. **download** — downloads all PDFs into `data/pdfs/<type>/<year>/`
+3. **convert** — converts each PDF to Markdown with YAML frontmatter in `data/markdown/` and to an HTML page in `data/html/`, and gathers the avis in a single document `data/avis.md` and in one document per type and year `data/corpus/<type>-<year>.md`
+4. **search** — generates the search page `data/index.html` and the [Pagefind](https://pagefind.app) full-text index in `data/pagefind/`
+5. **query** — sends each Markdown file to Ollama with a prompt and saves the answers
 
-## Prérequis
+## Requirements
 
 - Node.js 18+
-- [Ollama](https://ollama.com) en cours d'exécution sur `http://localhost:11434`
-- Pour l'OCR des PDF scannés (étape convert) : [Tesseract](https://github.com/tesseract-ocr/tesseract) avec le français, et `pdftoppm` (poppler).
-  Sous Debian/Ubuntu : `sudo apt-get install tesseract-ocr tesseract-ocr-fra poppler-utils`.
-  Sans ces outils, les PDF scannés sont convertis sans texte (avec un avertissement).
+- [Ollama](https://ollama.com) running on `http://localhost:11434` (only for `query`)
+- For OCR of scanned PDFs (convert step): [Tesseract](https://github.com/tesseract-ocr/tesseract) with French language data, and `pdftoppm` (poppler).
+  On Debian/Ubuntu: `sudo apt-get install tesseract-ocr tesseract-ocr-fra poppler-utils`.
+  Without these tools, scanned PDFs are converted without text (with a warning).
 
 ## Installation
 
@@ -29,15 +29,15 @@ fetch → download → convert → search
 npm install
 ```
 
-## Utilisation
+## Usage
 
-### Pipeline complet (fetch + download + convert + search)
+### Full pipeline (fetch + download + convert + search)
 
 ```bash
 npm run pipeline
 ```
 
-### Étapes individuelles
+### Individual steps
 
 ```bash
 npm run fetch      # → data/avis.json
@@ -46,33 +46,33 @@ npm run convert    # → data/markdown/, data/html/, data/avis.md, data/corpus/
 npm run search     # → data/index.html, data/pagefind/
 ```
 
-### Publication sur data.public.lu
+### Publication on data.public.lu
 
 ```bash
-npm run upload     # → data/archives/<type>-<année>.zip, puis envoi sur data.public.lu
+npm run upload     # → data/archives/<type>-<year>.zip, then upload to data.public.lu
 ```
 
-Crée une archive zip par type d'avis et par année, puis la publie dans le dataset du type
-(`art10ArchivesId`, `conseilArchivesId`). Une archive n'est envoyée que si elle est nouvelle
-ou si son hash diffère de celui de la ressource publiée. Les archives sont construites de
-façon déterministe (ordre et dates fixes) : leur hash ne change que si leur contenu change.
+Creates one zip archive per type of avis and per year, and publishes it in the dataset of that type
+(`art10ArchivesId`, `conseilArchivesId`). An archive is only uploaded if it is new or if its hash
+differs from the one of the published resource. Archives are built deterministically (fixed order
+and dates): their hash only changes when their content changes.
 
-### Recherche plein texte
+### Full-text search
 
 ```bash
-npm run search:serve   # génère l'index puis sert data/ sur http://localhost:1414
+npm run search:serve   # builds the index, then serves data/ on http://localhost:1414
 ```
 
-Le dossier `data/` (avec `index.html`, `html/` et `pagefind/`) peut aussi être publié tel quel sur n'importe quel hébergement statique.
-```
+The `data/` folder (with `index.html`, `html/` and `pagefind/`) can also be published as is on any static hosting.
+The GitHub Actions workflow (`.github/workflows/pages.yml`) runs the pipeline daily and publishes the search page on GitHub Pages.
 
-### Interroger les avis
+### Querying the avis
 
 ```bash
 node scripts/query.js --prompt "Quel est l'objet principal de cet avis ?"
 ```
 
-Les résultats sont sauvegardés dans `results/YYYY-MM-DDHHhMM.json` :
+Results are saved in `results/YYYY-MM-DDHHhMM.json`:
 
 ```json
 {
@@ -91,42 +91,48 @@ Les résultats sont sauvegardés dans `results/YYYY-MM-DDHHhMM.json` :
 
 ## Configuration
 
-Fichier `.env` :
+`.env` file (see `.env-example`):
 
 ```
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=mistral:latest
 
-# Publication sur data.public.lu (npm run upload)
+# Publication on data.public.lu (npm run upload)
 odpURL="https://data.public.lu/api/1"
 odpAPIKey="..."
-art10ArchivesId="..."      # dataset des archives art. 10
-conseilArchivesId="..."    # dataset des archives demandes de conseil
+art10ArchivesId="..."      # dataset of the article 10 archives
+conseilArchivesId="..."    # dataset of the advice request archives
 callRateNrCalls=1
 callRateDuration=1000
 ```
 
 ## Sources
 
-- [Demandes de conseil](https://cad.gouvernement.lu/fr/avis/demande-conseil.html)
-- [Demandes article 10](https://cad.gouvernement.lu/fr/avis/demande-art-10-loi.html)
+- [Advice requests (demandes de conseil)](https://cad.gouvernement.lu/fr/avis/demande-conseil.html)
+- [Article 10 requests (demandes article 10)](https://cad.gouvernement.lu/fr/avis/demande-art-10-loi.html)
 
 ## Structure
 
 ```
 data/
-  avis.json        index de tous les avis (référence, date, année, décision, URL PDF)
-  pdfs/            PDFs téléchargés (pdfs/<type>/<année>/)
-  archives/        archives zip par type et par année (npm run upload)
-  markdown/        Markdown généré (frontmatter + texte extrait)
-  avis.md          tous les avis dans un seul document Markdown (index + un bloc autonome par avis)
-  corpus/          même contenu découpé par type et par année (<type>-<année>.md)
-  ocr/             texte des PDF scannés obtenu par OCR (cache)
-results/           Résultats des requêtes Ollama
+  avis.json        index of all avis (reference, date, year, decision, PDF URL)
+  pdfs/            downloaded PDFs (pdfs/<type>/<year>/)
+  archives/        zip archives per type and year (npm run upload)
+  markdown/        generated Markdown (frontmatter + extracted text)
+  html/            one HTML page per avis (indexed by Pagefind)
+  avis.md          all avis in a single Markdown document (index + one self-contained block per avis)
+  corpus/          same content split by type and year (<type>-<year>.md)
+  ocr/             text of scanned PDFs obtained by OCR (cache)
+  index.html       full-text search page
+  pagefind/        Pagefind search index
+results/           results of Ollama queries
 scripts/
-  fetch.js         scraping HTML
-  download.js      téléchargement PDFs
-  convert.js       PDF → Markdown
-  query.js         requêtes Ollama
-  upload.js        archives zip + publication sur data.public.lu
+  fetch.js               HTML scraping
+  download.js            PDF download
+  convert.js             PDF → Markdown / HTML (with OCR, cleanup, removal of member names)
+  generate-pdf-index.js  search page
+  query.js               Ollama queries
+  upload.js              zip archives + publication on data.public.lu
+  odp.js                 data.public.lu (udata) API client
+  utils.js               throttled fetch, logging
 ```

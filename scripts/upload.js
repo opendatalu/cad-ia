@@ -1,12 +1,12 @@
 /**
- * Publication sur data.public.lu
+ * Publication on data.public.lu
  *
- * Pour chaque type d'avis, crée une archive zip par année à partir de
- * data/pdfs/<type>/<année>/ (dans data/archives/<type>-<année>.zip), puis la
- * synchronise avec le dataset dédié au type :
- *   - archive absente du dataset          → création de la ressource
- *   - archive présente, hash différent    → mise à jour de la ressource
- *   - archive présente, hash identique    → rien
+ * For each type of avis, creates one zip archive per year from
+ * data/pdfs/<type>/<year>/ (in data/archives/<type>-<year>.zip), then
+ * synchronizes it with the dataset dedicated to that type:
+ *   - archive not in the dataset          → the resource is created
+ *   - archive present, different hash     → the resource is updated
+ *   - archive present, same hash          → nothing
  */
 import * as dotenv from 'dotenv'
 import process from 'node:process'
@@ -25,13 +25,13 @@ const TYPES = {
   conseil: { label: 'demandes de conseil', datasetEnv: 'conseilArchivesId' }
 }
 
-// Date fixe pour toutes les entrées : l'archive ne dépend que du contenu des PDF,
-// donc son hash ne change que si un PDF est ajouté, retiré ou modifié.
+// Fixed date for all entries: the archive only depends on the content of the PDFs,
+// so its hash only changes when a PDF is added, removed or modified.
 const FIXED_DATE = new Date(Date.UTC(2000, 0, 1))
 
 /**
- * Crée l'archive zip d'une année, de façon déterministe.
- * Les PDF sont stockés sans recompression (ils sont déjà compressés).
+ * Builds the zip archive of one year, deterministically.
+ * PDFs are stored without recompression (they are already compressed).
  */
 async function buildArchive (yearDir) {
   const files = readdirSync(yearDir).filter(f => f.toLowerCase().endsWith('.pdf')).sort()
@@ -55,22 +55,22 @@ async function sync (type) {
   const { label, datasetEnv } = TYPES[type]
   const datasetId = process.env[datasetEnv]
   if (!datasetId) {
-    console.error(`Variable ${datasetEnv} non définie : archives ${type} ignorées`)
+    console.error(`Variable ${datasetEnv} is not set: ${type} archives skipped`)
     process.exitCode = 1
     return
   }
 
   const typeDir = Path.join(PDF_DIR, type)
   if (!existsSync(typeDir)) {
-    console.error(`${typeDir} introuvable. Lancez d'abord : npm run download`)
+    console.error(`${typeDir} not found. Run first: npm run download`)
     process.exitCode = 1
     return
   }
 
   const dataset = await odp.getDataset(datasetId)
   if (!Array.isArray(dataset.resources)) {
-    // Sans la liste des ressources, on recréerait des archives déjà publiées
-    console.error(`Impossible de lire le dataset ${datasetId} (${datasetEnv}) : archives ${type} ignorées`)
+    // Without the list of resources, archives already published would be uploaded again
+    console.error(`Cannot read dataset ${datasetId} (${datasetEnv}): ${type} archives skipped`)
     process.exitCode = 1
     return
   }
@@ -100,35 +100,35 @@ async function sync (type) {
     if (!existing) {
       const result = await odp.uploadResource(filename, data, datasetId, 'application/zip')
       if (!result.id) {
-        console.error(`Erreur : échec de l'upload de ${filename}`)
+        console.error(`Error: upload of ${filename} failed`)
         process.exitCode = 1
         continue
       }
       await odp.updateResourceMeta(datasetId, result.id, title, description)
-      console.log(`${filename} : ajouté (${count} avis)`)
+      console.log(`${filename}: added (${count} avis)`)
       continue
     }
 
     const algo = existing.checksum?.type || 'sha1'
     if (existing.checksum?.value && existing.checksum.value === hashOf(data, algo)) {
-      console.log(`${filename} : inchangé`)
+      console.log(`${filename}: unchanged`)
       continue
     }
 
     const result = await odp.updateResource(filename, data, datasetId, existing.id, 'application/zip')
     const resultMeta = await odp.updateResourceMeta(datasetId, existing.id, title, description)
     if (Object.keys(result).length === 0 || Object.keys(resultMeta).length === 0) {
-      console.error(`Erreur : échec de la mise à jour de ${filename}`)
+      console.error(`Error: update of ${filename} failed`)
       process.exitCode = 1
       continue
     }
-    console.log(`${filename} : mis à jour (${count} avis)`)
+    console.log(`${filename}: updated (${count} avis)`)
   }
 
-  // Les ressources sans archive locale correspondante ne sont pas supprimées automatiquement
+  // Resources without a matching local archive are not deleted automatically
   const local = new Set(years.map(y => `${type}-${y}.zip`))
   const orphans = [...remote.keys()].filter(f => !local.has(f))
-  if (orphans.length > 0) log(`Ressources du dataset ${type} sans archive locale (non supprimées) :`, orphans)
+  if (orphans.length > 0) log(`Resources of the ${type} dataset without a local archive (not deleted):`, orphans)
 }
 
 async function main () {
@@ -138,4 +138,4 @@ async function main () {
   }
 }
 
-main().then(() => { log((new Date()).toLocaleString(), 'Sync terminée') }).catch(e => { console.error(e); process.exitCode = 1 })
+main().then(() => { log((new Date()).toLocaleString(), 'Sync done') }).catch(e => { console.error(e); process.exitCode = 1 })

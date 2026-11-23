@@ -190,18 +190,18 @@ function buildFrontmatter(meta) {
 function cleanText(text) {
   let clean = text
     .replace(/\f/g, '\n\n')
-    // Format récent (2023+) : en-tête sur 2 lignes répété à chaque page
+    // Recent format (2023+): 2-line header repeated on every page
     .replace(/^2, place de Clairefontaine,.*\nL-1341 Luxembourg.*\n?/gm, '')
-    // Ancien format : pied de page "Commission d'accès aux documents" + numéro de page suivant
-    // L'apostrophe dans les PDFs est U+2019 (guillemet courbe), pas U+0027
+    // Old format: footer "Commission d'accès aux documents" followed by the page number
+    // The apostrophe in the PDFs is U+2019 (curly quote), not U+0027
     .replace(/^Commission d’accès aux documents[ \t]*\n(\n*\d+[ \t]*\n)?/gm, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  // Après trim, le numéro de page initial (ancien format) se retrouve en tête
+  // After trim, the first page number (old format) ends up at the start
   clean = clean
     .replace(/^\d+\n\n?/, '')
-    // Pied de page de la dernière page (ancien format), en fin de texte
+    // Footer of the last page (old format), at the end of the text
     .replace(/\n+Commission d’accès aux documents\s*$/, '')
     .trim();
   return removePresents(removeSignatures(reflow(clean)));
@@ -297,7 +297,7 @@ function reflow(text) {
 
 async function main() {
   if (!existsSync(PDF_DIR)) {
-    console.error('data/pdfs/ introuvable. Lancez d\'abord : npm run download');
+    console.error('data/pdfs/ not found. Run first: npm run download');
     process.exit(1);
   }
 
@@ -319,7 +319,7 @@ async function main() {
 
   const pdfs = readdirSync(PDF_DIR, {recursive: true}).filter(f => f.endsWith('.pdf'));
   if (pdfs.length === 0) {
-    console.error('Aucun PDF dans data/pdfs. Lancez d\'abord : npm run download');
+    console.error('No PDF in data/pdfs. Run first: npm run download');
     process.exit(1);
   }
 
@@ -331,7 +331,7 @@ async function main() {
     const mdPath = join(MD_DIR, `${key}.md`);
     const type = pdfFile.split(sep)[0];
     let meta = avisMap[`${type}/${basename(pdfFile)}`] || {};
-    if (!meta.pdfUrl) console.warn(`\n  Avertissement : ${pdfFile} absent de data/avis.json, pas d'URL PDF`);
+    if (!meta.pdfUrl) console.warn(`\n  Warning: ${pdfFile} is not in data/avis.json, no PDF URL`);
 
     process.stdout.write(`Converting ${pdfFile}...`);
     try {
@@ -344,7 +344,7 @@ async function main() {
       if (text.replace(/\s/g, '').length < MIN_TEXT_CHARS) {
         const ocrText = ocrPdf(join(PDF_DIR, pdfFile), key);
         if (ocrText === null) {
-          console.warn(`\n  Avertissement : ${pdfFile} est scanné, mais tesseract/pdftoppm ne sont pas installés`);
+          console.warn(`\n  Warning: ${pdfFile} is scanned, but tesseract/pdftoppm are not installed`);
         } else {
           text = cleanText(ocrText);
           ocr = true;
@@ -382,17 +382,17 @@ async function main() {
       console.log(` OK (${data.numpages} page${data.numpages > 1 ? 's' : ''})`);
       converted++;
     } catch (err) {
-      console.error(` ERREUR: ${err.message}`);
+      console.error(` ERROR: ${err.message}`);
       errors++;
     }
   }
 
-  console.log(`\nTerminé : ${converted} convertis, ${errors} erreurs`);
+  console.log(`\nDone: ${converted} converted, ${errors} errors`);
 
-  console.log(`HTML générés dans ${HTML_DIR} : ${converted}`);
+  console.log(`HTML pages generated in ${HTML_DIR}: ${converted}`);
 
   writeFileSync(ALL_MD, buildMarkdownDoc(allEntries, 'Avis de la Commission d\'accès aux documents'), 'utf8');
-  console.log(`Document unique : ${ALL_MD} (${allEntries.length} avis)`);
+  console.log(`Single document: ${ALL_MD} (${allEntries.length} avis)`);
 
   // One document per type and year, for tools that limit the size of a document
   rmSync(CORPUS_DIR, { recursive: true, force: true });
@@ -408,7 +408,7 @@ async function main() {
     writeFileSync(join(CORPUS_DIR, `${k}.md`),
       buildMarkdownDoc(entries, `Avis de la Commission d'accès aux documents – ${SECTION_LABELS[type] || type} – ${year}`), 'utf8');
   }
-  console.log(`Documents par type et par année : ${CORPUS_DIR}/ (${groups.size} fichiers)`);
+  console.log(`Documents per type and year: ${CORPUS_DIR}/ (${groups.size} files)`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
