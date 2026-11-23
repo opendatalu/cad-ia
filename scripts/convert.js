@@ -9,6 +9,8 @@ const PDF_DIR = './data/pdfs';
 const typesAvis = ['conseil', 'art10'];
 const MD_DIR = './data/markdown';
 const HTML_DIR = './data/html';
+// Single document with all avis (outside MD_DIR so that query.js does not pick it up)
+const ALL_MD = './data/avis.md';
 
 function yamlEscape(val) {
   if (val === null || val === undefined) return 'null';
@@ -75,6 +77,38 @@ ${rendered}
 `;
 }
 
+const SECTION_LABELS = { conseil: 'Demandes de conseil', art10: 'Demandes sur base de l\'article 10' };
+
+// Builds one Markdown document with all avis: by type, then year (most recent first)
+function buildAllMarkdown(entries) {
+  const out = [
+    '# Avis de la Commission d\'accès aux documents',
+    '',
+    `${entries.length} avis.`,
+  ];
+  const types = [...Object.keys(SECTION_LABELS), ...new Set(entries.map(e => e.type).filter(t => !(t in SECTION_LABELS)))];
+  for (const type of types) {
+    const ofType = entries.filter(e => e.type === type);
+    if (ofType.length === 0) continue;
+    out.push('', `## ${SECTION_LABELS[type] || type} (${ofType.length})`);
+    const years = [...new Set(ofType.map(e => e.year))].sort((a, b) => b - a);
+    for (const year of years) {
+      const ofYear = ofType
+        .filter(e => e.year === year)
+        .sort((a, b) => a.file.localeCompare(b.file, 'fr', { numeric: true }));
+      out.push('', `### ${year}`);
+      for (const e of ofYear) {
+        out.push('', `#### ${e.title}`, '');
+        if (e.meta.decision) out.push(`- **Décision :** ${e.meta.decision}`);
+        if (e.meta.description) out.push(`- **Objet :** ${e.meta.description}`);
+        if (e.meta.pdfUrl) out.push(`- **PDF :** <${e.meta.pdfUrl}>`);
+        out.push('', e.text);
+      }
+    }
+  }
+  return out.join('\n') + '\n';
+}
+
 function buildFrontmatter(meta) {
   const lines = ['---'];
   for (const [k, v] of Object.entries(meta)) {
@@ -129,6 +163,7 @@ async function main() {
   }
 
   let converted = 0, errors = 0;
+  const allEntries = [];
 
   for (const pdfFile of pdfs) {
     const key = basename(pdfFile, '.pdf');
@@ -155,6 +190,14 @@ async function main() {
 
       writeFileSync(mdPath, `${frontmatter}\n\n${text}`, 'utf8');
       writeFileSync(join(HTML_DIR, `${key}.html`), buildHtml(meta, avisTitle(meta, key), md.render(text)), 'utf8');
+      allEntries.push({
+        type: meta.type || type,
+        year: meta.year || Number(pdfFile.split(sep)[1]) || 0,
+        file: basename(pdfFile),
+        title: avisTitle(meta, key),
+        meta,
+        text,
+      });
       console.log(` OK (${data.numpages} page${data.numpages > 1 ? 's' : ''})`);
       converted++;
     } catch (err) {
@@ -166,6 +209,9 @@ async function main() {
   console.log(`\nTerminé : ${converted} convertis, ${errors} erreurs`);
 
   console.log(`HTML générés dans ${HTML_DIR} : ${converted}`);
+
+  writeFileSync(ALL_MD, buildAllMarkdown(allEntries), 'utf8');
+  console.log(`Document unique : ${ALL_MD} (${allEntries.length} avis)`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
