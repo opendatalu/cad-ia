@@ -64,6 +64,8 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Keep the site out of search engines -->
+  <meta name="robots" content="noindex, nofollow">
   <title>Avis de la CAD</title>
   <link href="pagefind/pagefind-component-ui.css" rel="stylesheet">
   <script src="pagefind/pagefind-component-ui.js" type="module"></script>

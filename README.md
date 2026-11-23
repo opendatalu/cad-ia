@@ -64,7 +64,7 @@ npm run search:serve   # builds the index, then serves data/ on http://localhost
 ```
 
 The `data/` folder (with `index.html`, `html/` and `pagefind/`) can also be published as is on any static hosting.
-The GitHub Actions workflow (`.github/workflows/pages.yml`) runs the pipeline daily and publishes the search page on GitHub Pages.
+The GitHub Actions workflow (`.github/workflows/pages.yml`) runs the pipeline twice a month (1st and 15th) and on every push to `main`, and publishes the search page on GitHub Pages.
 
 ### Querying the avis
 

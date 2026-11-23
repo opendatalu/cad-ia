@@ -66,6 +66,8 @@ function buildHtml(meta, title, rendered) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Keep the site out of search engines -->
+  <meta name="robots" content="noindex, nofollow">
   <title>${e(title)}</title>
   <style>body{font-family:system-ui,sans-serif;max-width:50rem;margin:2rem auto;padding:0 1rem;line-height:1.5}</style>
 </head>
