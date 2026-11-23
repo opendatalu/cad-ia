@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const pdf = require('pdf-parse/lib/pdf-parse.js');
 import markdownit from 'markdown-it';
+import JSZip from 'jszip';
 
 const PDF_DIR = './data/pdfs';
 const typesAvis = ['conseil', 'art10'];
@@ -15,6 +16,8 @@ const HTML_DIR = './data/html';
 // (outside MD_DIR so that query.js does not pick them up)
 const ALL_MD = './data/avis.md';
 const CORPUS_DIR = './data/corpus';
+// Zip archive of CORPUS_DIR, published on the website for download
+const CORPUS_ZIP = './data/corpus.zip';
 // OCR results of scanned PDFs (cache: OCR is only run once per PDF)
 const OCR_DIR = './data/ocr';
 // Below this number of characters, the PDF is considered scanned (no text layer)
@@ -411,6 +414,16 @@ async function main() {
       buildMarkdownDoc(entries, `Avis de la Commission d'accès aux documents – ${SECTION_LABELS[type] || type} – ${year}`), 'utf8');
   }
   console.log(`Documents per type and year: ${CORPUS_DIR}/ (${groups.size} files)`);
+
+  // Zip archive of the corpus. Fixed date and sorted entries: the archive only
+  // changes when the content of the corpus changes.
+  const zip = new JSZip();
+  for (const f of readdirSync(CORPUS_DIR).filter(f => f.endsWith('.md')).sort()) {
+    zip.file(`corpus/${f}`, readFileSync(join(CORPUS_DIR, f)), { date: new Date(Date.UTC(2000, 0, 1)), createFolders: false });
+  }
+  const zipData = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 }, platform: 'UNIX' });
+  writeFileSync(CORPUS_ZIP, zipData);
+  console.log(`Corpus archive: ${CORPUS_ZIP} (${(zipData.length / 1024 / 1024).toFixed(1)} MB)`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

@@ -11,7 +11,7 @@ fetch → download → convert → search
 
 1. **fetch** — scrapes the two HTML pages of the CAD and generates `data/avis.json`
 2. **download** — downloads all PDFs into `data/pdfs/<type>/<year>/`
-3. **convert** — converts each PDF to Markdown with YAML frontmatter in `data/markdown/` and to an HTML page in `data/html/`, and gathers the avis in a single document `data/avis.md` and in one document per type and year `data/corpus/<type>-<year>.md`
+3. **convert** — converts each PDF to Markdown with YAML frontmatter in `data/markdown/` and to an HTML page in `data/html/`, and gathers the avis in a single document `data/avis.md` and in one document per type and year `data/corpus/<type>-<year>.md`, zipped in `data/corpus.zip`
 4. **search** — generates the search page `data/index.html` and the [Pagefind](https://pagefind.app) full-text index in `data/pagefind/`
 5. **query** — sends each Markdown file to Ollama with a prompt and saves the answers
 
@@ -122,6 +122,7 @@ data/
   html/            one HTML page per avis (indexed by Pagefind)
   avis.md          all avis in a single Markdown document (index + one self-contained block per avis)
   corpus/          same content split by type and year (<type>-<year>.md)
+  corpus.zip       zip archive of corpus/, downloadable from the search page
   ocr/             text of scanned PDFs obtained by OCR (cache)
   index.html       full-text search page
   pagefind/        Pagefind search index

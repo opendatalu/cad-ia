@@ -66,13 +66,13 @@ jobs:
       - name: Generate the search page and the Pagefind index
         run: npm run search
 
-      # Only the site is published (search page, avis pages, index).
+      # Only the site is published (search page, avis pages, index, corpus archive).
       # PDFs and Markdown stay out of the site: the pages link
       # to the original PDFs on cad.gouvernement.lu.
       - name: Prepare the site
         run: |
           mkdir -p _site
-          cp -r data/index.html data/html data/pagefind _site/
+          cp -r data/index.html data/html data/pagefind data/corpus.zip _site/
 
       - uses: actions/configure-pages@v5
 
