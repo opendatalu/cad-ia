@@ -204,7 +204,22 @@ function cleanText(text) {
     // Pied de page de la dernière page (ancien format), en fin de texte
     .replace(/\n+Commission d’accès aux documents\s*$/, '')
     .trim();
-  return removeSignatures(reflow(clean));
+  return removePresents(removeSignatures(reflow(clean)));
+}
+
+// Removes the « Présents : » block (members of the CAD present at the meeting) at the
+// beginning of the avis: the "Présents" paragraph and the following member lines,
+// i.e. short paragraphs ending with a role in brackets ("Louis Oberhag (Membre)",
+// "Jessica Ribeiro (Membre suppléant et secrétaire)").
+function removePresents(text) {
+  const paragraphs = text.split('\n\n');
+  const start = paragraphs.findIndex(p => /^Présente?s?\s*:/i.test(p));
+  if (start === -1 || paragraphs[start].length > 300) return text;
+  const isMemberLine = p => p.length <= 300 &&
+    /\([^()]*(membre|président|secrétaire|suppléant)[^()]*\)$/i.test(p.trim());
+  let end = start + 1;
+  while (end < paragraphs.length && isMemberLine(paragraphs[end])) end++;
+  return [...paragraphs.slice(0, start), ...paragraphs.slice(end)].join('\n\n');
 }
 
 const ADOPTION_LINE = /^(Avis adopté|Luxembourg,? le|Fait à Luxembourg)/i;
@@ -261,7 +276,8 @@ function reflow(text) {
       flush();
       continue;
     }
-    if (cur && !LIST_ITEM.test(line)) {
+    // A new paragraph starts with a list item or with the « Présents : » block
+    if (cur && !LIST_ITEM.test(line) && !/^Présente?s?\s*:/i.test(line)) {
       const continues = /^[a-zà-ÿ,;.)\]]/.test(line) && !/[.!?]$/.test(last);
       const wrapped = last.length >= 0.7 * width && !/[.!?:;]$/.test(last);
       if (continues || wrapped) {
